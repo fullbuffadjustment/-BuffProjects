@@ -1,4 +1,4 @@
-# Coded for CircuitPython 9+ on Raspberry Pi Pico (RP2040)
+# Coded for CircuitPython 9+ on kb2040
 # Ultra-Low-Power Hiking Weather Station: Light Sleep + Adaptive Polling + Zambretti
 
 import time
@@ -12,6 +12,7 @@ import displayio
 import terminalio
 import adafruit_sht4x
 import adafruit_bmp3xx
+import digitalio
 from adafruit_display_text import label
 from i2cdisplaybus import I2CDisplayBus
 import adafruit_displayio_ssd1306 as ssd1306
@@ -21,6 +22,13 @@ displayio.release_displays()
 
 
 i2c = board.STEMMA_I2C() #built in STEMMA board
+
+#creating DigitalInOut object on d3, analog on A0
+vsys_adc = analogio.AnalogIn(board.A0)
+batt_gnd_pin = digitalio.DigitalInOut(board.A3)
+batt_gnd_pin.direction = digitalio.Direction.INPUT
+BATTERY_TYPE = "LIPO"  # Options: "LIPO" (1S 3.3V-4.2V) or "AA" (3x AA 3.3V-4.5V)
+
 
 # Initialize SHT4x sensor (0x44) and BMP390 pressure sensor (0x77 default, 0x76 alternate)
 sht = adafruit_sht4x.SHT4x(i2c, 0x44)
@@ -35,9 +43,7 @@ except ValueError:
 bmp.pressure_oversampling = 4
 bmp.temperature_oversampling = 1
 
-# Built-in VSYS battery voltage monitor (3:1 voltage divider on GP29)
-vsys_adc = analogio.AnalogIn(board.A0)
-BATTERY_TYPE = "LIPO"  # Options: "LIPO" (1S 3.3V-4.2V) or "AA" (3x AA 3.3V-4.5V)
+
 
 # Configure and initialize SSD1306 OLED display (128x64 at 0x3D)
 ssd_width = 128
@@ -105,10 +111,17 @@ LIPO_CURVE = (
 )
 
 def read_battery():
-    """Returns (voltage, percentage_int, short_tag_str)."""
-    raw_sum = 0
-    for _ in range(4):
-        raw_sum += vsys_adc.value
+    """switch gnd pin to output"""
+    batt_gnd_pin.direction = digitalio.Direction.OUTPUT
+    batt_gnd_pin.value = False
+    try:
+        time.sleep(0.002)
+        raw_sum = 0
+        for _ in range(4):
+            raw_sum += vsys_adc.value
+    finally:
+        batt_gnd_pin.direction = digitalio.Direction.INPUT 
+
     voltage = ((raw_sum / 4.0) * 3.3 / 65535.0) * 2.0
 
     if voltage > 4.35 and BATTERY_TYPE == "LIPO":
@@ -131,6 +144,8 @@ def read_battery():
             ratio = (voltage - v_lo) / (v_hi - v_lo)
             pct = int(round(p_lo + ratio * (p_hi - p_lo)))
             return voltage, pct, f"{pct}%"
+
+    batt_gnd_pin.direction = digitalio.Direction.INPUT
 
     return voltage, 0, "0%"
 
@@ -510,7 +525,6 @@ while True:
             last_activity = time.monotonic()
             last_sensor_read = -ACTIVE_SENSOR_INTERVAL
             render_screen()
-
 # # SPDX-FileCopyrightText: 2023 DJDevon3
 # # SPDX-License-Identifier: MIT
 # # Pi Pico & Picowbell with SSD1306 display & BME280 sensor
